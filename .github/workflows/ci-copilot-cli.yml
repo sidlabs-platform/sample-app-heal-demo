@@ -1,0 +1,73 @@
+name: CI Pipeline (Copilot CLI)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ci-output.log
+
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee -a ci-output.log
+
+      - name: Generate diagnostic JSON
+        if: failure()
+        run: |
+          npm run lint:json || true
+          npm run test:json || true
+
+      - name: Upload CI artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-output
+          path: |
+            ci-output.log
+            lint-output.json
+            test-results.json
+
+  auto-heal:
+    needs: build-and-test
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CI log
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-output
+
+      - name: Run Auto-Heal CI Agent
+        uses: sidlabs-platform/Auto-Heal-CI-Agent@feature/github-action-ghes
+        with:
+          backend: copilot-cli
+          language: node
+          log-file: ci-output.log
+          commit-mode: pr
+          max-attempts: 2
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
