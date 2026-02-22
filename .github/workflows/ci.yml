@@ -21,10 +21,16 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint 2>&1 | tee ci-output.log
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ci-output.log
 
       - name: Test
-        run: npm test 2>&1 | tee -a ci-output.log
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee -a ci-output.log
 
       - name: Upload CI log
         if: failure()
