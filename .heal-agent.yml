@@ -1,0 +1,20 @@
+# Auto-Heal CI Agent configuration
+# See: https://github.com/siddjoshi/Auto-Heal-CI-Agent
+
+backend: copilot-agent
+language: node
+
+commit:
+  mode: pr
+  branch-prefix: auto-heal/
+
+allowed-paths:
+  - src/
+  - tests/
+
+safety:
+  max-attempts: 2
+  dry-run: false
+
+copilot:
+  # botId: BOT_kgDOxxxxxx   # Override for GHES; omit for GHEC default
