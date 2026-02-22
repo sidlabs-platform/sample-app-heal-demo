@@ -23,13 +23,13 @@ app.get('/tasks', (req, res) => {
 
 // Create task
 app.post('/tasks', (req, res) => {
-  var { title } = req.body;
+  const { title } = req.body;
   if (!title || typeof title !== 'string' || title.trim().length === 0) {
     return res.status(400).json({ error: 'Title is required' });
   }
-  var task = { id: nextId++, title: title.trim(), completed: false };
+  const task = { id: nextId++, title: title.trim(), completed: false };
   tasks.push(task);
-  res.status(200).json(task);
+  res.status(201).json(task);
 });
 
 // Get task by ID
