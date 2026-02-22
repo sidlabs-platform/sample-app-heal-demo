@@ -69,5 +69,6 @@ jobs:
           log-file: ci-output.log
           commit-mode: pr
           max-attempts: 2
+          llm-model: gpt-4o
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
