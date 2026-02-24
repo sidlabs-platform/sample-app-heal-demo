@@ -1,6 +1,10 @@
 name: CI Pipeline (Copilot CLI)
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -54,201 +58,22 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          token: ${{ secrets.GH_PAT }}
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Download CI artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: ci-output
         continue-on-error: true
 
-      - name: Re-generate diagnostics
-        run: |
-          npm run lint:json || true
-          npm run test:json || true
-
-      - name: Install Copilot CLI
-        run: npm install -g @github/copilot
-
-      - name: Build heal prompt
-        id: prompt
-        shell: bash
-        run: |
-          FAILURE_TYPE="unknown"
-          FAILURES=""
-          CI_LOG_TAIL=""
-
-          # Read CI log tail
-          if [ -f ci-output.log ]; then
-            CI_LOG_TAIL=$(tail -200 ci-output.log)
-          fi
-
-          # Detect lint failures
-          if [ -f lint-output.json ]; then
-            LINT_ERRORS=$(node -e "
-              const r = JSON.parse(require('fs').readFileSync('lint-output.json','utf8'));
-              const errs = r.filter(f => f.errorCount > 0).flatMap(f =>
-                f.messages.filter(m => m.severity === 2).map(m =>
-                  f.filePath.replace(process.cwd()+'/', '') + ':' + m.line + ' ' + m.ruleId + ': ' + m.message
-                )
-              );
-              if (errs.length) { console.log(errs.join('\n')); }
-            " 2>/dev/null || true)
-            if [ -n "$LINT_ERRORS" ]; then
-              FAILURE_TYPE="lint-violation"
-              FAILURES="$LINT_ERRORS"
-            fi
-          fi
-
-          # Detect test failures
-          if [ -f test-results.json ]; then
-            TEST_ERRORS=$(node -e "
-              const r = JSON.parse(require('fs').readFileSync('test-results.json','utf8'));
-              if (r.numFailedTests > 0) {
-                const fails = r.testResults.flatMap(s =>
-                  (s.testResults||[]).filter(t => t.status==='failed').map(t =>
-                    t.fullName + ': ' + (t.failureMessages||[]).join(' ').substring(0,500)
-                  )
-                );
-                console.log(fails.join('\n'));
-              }
-            " 2>/dev/null || true)
-            if [ -n "$TEST_ERRORS" ]; then
-              if [ "$FAILURE_TYPE" = "unknown" ]; then
-                FAILURE_TYPE="test-failure"
-              else
-                FAILURE_TYPE="${FAILURE_TYPE}+test-failure"
-              fi
-              FAILURES="${FAILURES}
-          ${TEST_ERRORS}"
-            fi
-          fi
-
-          # Build the prompt and write to file (avoids shell escaping issues)
-          cat > /tmp/heal-prompt.txt <<PROMPT_EOF
-          You are a CI/CD auto-healer. The CI pipeline failed with a ${FAILURE_TYPE}.
-
-          ## Failure Details
-          ${FAILURES}
-
-          ## CI Log (last 200 lines)
-          ${CI_LOG_TAIL}
-
-          ## Instructions
-          1. Read the failure details above.
-          2. Read the relevant source files in the repository.
-          3. Fix the root cause with minimal changes.
-          4. Only modify files under src/ and tests/.
-          5. Do NOT delete or skip tests.
-          6. After fixing, verify with: npm run lint && npm test
-          PROMPT_EOF
-
-          echo "failure_type=$FAILURE_TYPE" >> "$GITHUB_OUTPUT"
-          echo "[heal] Failure type: $FAILURE_TYPE"
-
-      - name: Run Copilot CLI
-        shell: bash
-        run: |
-          mkdir -p .heal-audit
-          echo "[heal] Invoking Copilot CLI with --agent=auto-healer..."
-          copilot \
-            -p "$(cat /tmp/heal-prompt.txt)" \
-            --agent=auto-healer \
-            --allow-all-tools \
-            2>&1 | tee .heal-audit/copilot-output.log
+      - name: Auto-Heal
+        uses: sidlabs-platform/Auto-Heal-CI-Agent@feature/github-action-ghes
+        with:
+          backend: copilot-cli
+          language: node
+          log-file: ci-output.log
+          commit-mode: pr
+          max-attempts: 2
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GH_TOKEN: ${{ secrets.GH_PAT }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-
-      - name: Validate fix
-        id: validate
-        shell: bash
-        run: |
-          echo "[heal] Validating fix..."
-          if npm run lint && npm test; then
-            echo "[heal] Validation PASSED"
-            echo "valid=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "[heal] Validation FAILED"
-            echo "valid=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create fix branch and push
-        if: steps.validate.outputs.valid == 'true'
-        id: push-fix
-        shell: bash
-        run: |
-          BRANCH="auto-heal/copilot-cli-$(date +%s)"
-          git config user.name "auto-heal-bot"
-          git config user.email "auto-heal-bot@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add src/ tests/
-          if git diff --cached --quiet; then
-            echo "[heal] No changes to commit"
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          FAILURE_TYPE="${{ steps.prompt.outputs.failure_type }}"
-          git commit -m "fix(auto-heal): ${FAILURE_TYPE} (copilot-cli)"
-          git push origin "$BRANCH"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "has_changes=true" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-
-      - name: Create fix PR
-        if: steps.push-fix.outputs.has_changes == 'true'
-        continue-on-error: true
-        shell: bash
-        run: |
-          FAILURE_TYPE="${{ steps.prompt.outputs.failure_type }}"
-          BRANCH="${{ steps.push-fix.outputs.branch }}"
-
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "Auto-heal: fix ${FAILURE_TYPE}" \
-            --body "## Auto-Heal Fix (Copilot CLI)
-
-          **Failure type:** ${FAILURE_TYPE}
-          **Validation:** Passed (lint + tests)
-
-          ---
-          *Created automatically by the self-healing CI pipeline using GitHub Copilot CLI.*"
-
-          if [ $? -ne 0 ]; then
-            echo "::warning::PR creation failed (likely PAT permission). Branch $BRANCH was pushed successfully — create PR manually."
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-
-      - name: Report failure
-        if: steps.validate.outputs.valid != 'true'
-        run: |
-          echo "::error::Auto-heal fix did not pass validation. Manual intervention required."
-          exit 1
-
-      - name: Summary
-        if: steps.validate.outputs.valid == 'true'
-        shell: bash
-        run: |
-          echo "[heal] Auto-heal completed successfully!"
-          echo "[heal] Failure type: ${{ steps.prompt.outputs.failure_type }}"
-          echo "[heal] Branch: ${{ steps.push-fix.outputs.branch }}"
-          echo "[heal] Fix validated and pushed."
-
-      - name: Upload heal audit
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: heal-audit
-          path: .heal-audit/
-          retention-days: 30
