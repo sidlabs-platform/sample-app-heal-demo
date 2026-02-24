@@ -208,19 +208,37 @@ jobs:
         if: steps.push-fix.outputs.has_changes == 'true'
         shell: bash
         run: |
-          gh pr create \
-            --base main \
-            --head "${{ steps.push-fix.outputs.branch }}" \
-            --title "Auto-heal: fix ${{ steps.prompt.outputs.failure_type }}" \
-            --body "## Auto-Heal Fix (Copilot CLI)
+          FAILURE_TYPE="${{ steps.prompt.outputs.failure_type }}"
+          BRANCH="${{ steps.push-fix.outputs.branch }}"
+          PR_BODY="## Auto-Heal Fix (Copilot CLI)
 
-          **Failure type:** ${{ steps.prompt.outputs.failure_type }}
+          **Failure type:** ${FAILURE_TYPE}
           **Validation:** Passed (lint + tests)
 
           ---
           *Created automatically by the self-healing CI pipeline using GitHub Copilot CLI.*"
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+          # Use REST API (more reliable with Fine-Grained PATs than GraphQL)
+          PR_URL=$(curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GH_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls" \
+            -d "$(jq -n \
+              --arg title "Auto-heal: fix ${FAILURE_TYPE}" \
+              --arg body "$PR_BODY" \
+              --arg head "$BRANCH" \
+              --arg base "main" \
+              '{title: $title, body: $body, head: $head, base: $base}')" \
+            | jq -r '.html_url // .message')
+
+          echo "[heal] PR result: $PR_URL"
+          if [[ "$PR_URL" == http* ]]; then
+            echo "[heal] PR created successfully: $PR_URL"
+          else
+            echo "[heal] PR creation failed: $PR_URL"
+            echo "[heal] Branch $BRANCH was pushed successfully — create PR manually."
+            exit 1
+          fi
 
       - name: Report failure
         if: steps.validate.outputs.valid != 'true'
