@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "test": "jest --verbose",
     "lint": "eslint src/ tests/",
-    "lint:json": "eslint src/ tests/ --format json || true",
+    "lint:json": "eslint src/ tests/ --format json --output-file lint-output.json || true",
     "test:json": "jest --json --outputFile=test-results.json || true"
   },
   "keywords": [],

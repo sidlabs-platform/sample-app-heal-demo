@@ -1,20 +1,28 @@
 # Auto-Heal CI Agent configuration
-# See: https://github.com/siddjoshi/Auto-Heal-CI-Agent
+# See: https://github.com/sidlabs-platform/Auto-Heal-CI-Agent
 
-backend: copilot-agent
+backend: copilot-cli
 language: node
 
 commit:
   mode: pr
   branch-prefix: auto-heal/
 
-allowed-paths:
-  - src/
-  - tests/
+paths:
+  allowed:
+    - src/
+    - tests/
+  protected:
+    - .github/
+    - scripts/
+    - .env
+
+commands:
+  lint: npm run lint
+  test: npm test
+  build: node -e "require('./src/app'); console.log('Build check passed');"
+  install: npm ci
 
 safety:
   max-attempts: 2
   dry-run: false
-
-copilot:
-  # botId: BOT_kgDOxxxxxx   # Override for GHES; omit for GHEC default
