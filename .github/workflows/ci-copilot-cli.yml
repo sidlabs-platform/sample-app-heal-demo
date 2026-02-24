@@ -164,7 +164,9 @@ jobs:
             --allow-all-tools \
             2>&1 | tee .heal-audit/copilot-output.log
         env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
 
       - name: Validate fix
         id: validate
