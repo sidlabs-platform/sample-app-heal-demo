@@ -181,8 +181,9 @@ jobs:
             echo "valid=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create fix PR
+      - name: Create fix branch and push
         if: steps.validate.outputs.valid == 'true'
+        id: push-fix
         shell: bash
         run: |
           BRANCH="auto-heal/copilot-cli-$(date +%s)"
@@ -192,15 +193,25 @@ jobs:
           git add src/ tests/
           if git diff --cached --quiet; then
             echo "[heal] No changes to commit"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           FAILURE_TYPE="${{ steps.prompt.outputs.failure_type }}"
           git commit -m "fix(auto-heal): ${FAILURE_TYPE} (copilot-cli)"
           git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
+      - name: Create fix PR
+        if: steps.push-fix.outputs.has_changes == 'true'
+        shell: bash
+        run: |
           gh pr create \
             --base main \
-            --head "$BRANCH" \
-            --title "Auto-heal: fix ${FAILURE_TYPE}" \
+            --head "${{ steps.push-fix.outputs.branch }}" \
+            --title "Auto-heal: fix ${{ steps.prompt.outputs.failure_type }}" \
             --body "## Auto-Heal Fix (Copilot CLI)
 
           **Failure type:** ${{ steps.prompt.outputs.failure_type }}
@@ -209,7 +220,7 @@ jobs:
           ---
           *Created automatically by the self-healing CI pipeline using GitHub Copilot CLI.*"
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Report failure
         if: steps.validate.outputs.valid != 'true'
