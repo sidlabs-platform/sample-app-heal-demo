@@ -220,7 +220,7 @@ jobs:
           ---
           *Created automatically by the self-healing CI pipeline using GitHub Copilot CLI.*"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
 
       - name: Report failure
         if: steps.validate.outputs.valid != 'true'
