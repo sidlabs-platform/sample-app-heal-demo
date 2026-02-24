@@ -1,5 +1,5 @@
 const express = require('express');
-var app = express();
+const app = express();
 
 // In-memory task store
 let tasks = [];
